@@ -1,0 +1,178 @@
+import os
+import sys
+import json
+import time
+import asyncio
+import logging
+import threading
+import hashlib
+import requests
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
+from tenacity import retry, stop_after_attempt, wait_exponential
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout, Input
+from dotenv import load_dotenv
+import pyupbit
+from openai import OpenAI
+import ta
+import telegram
+from telegram import Bot
+from filelock import FileLock
+from ta.volatility import BollingerBands, AverageTrueRange
+from ta.momentum import RSIIndicator
+from ta.trend import MACD, EMAIndicator, ADXIndicator
+
+# API 키 설정
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+UPBIT_ACCESS_KEY = os.getenv("UPBIT_ACCESS_KEY")
+UPBIT_SECRET_KEY = os.getenv("UPBIT_SECRET_KEY")
+
+logger.info("API 키 확인 중...")
+missing_keys = []
+for key, value in [
+    ("TELEGRAM_TOKEN", TELEGRAM_TOKEN),
+    ("TELEGRAM_CHAT_ID", TELEGRAM_CHAT_ID),
+    ("OPENAI_API_KEY", OPENAI_API_KEY),
+    ("UPBIT_ACCESS_KEY", UPBIT_ACCESS_KEY),
+    ("UPBIT_SECRET_KEY", UPBIT_SECRET_KEY)
+]:
+    if not value:
+        missing_keys.append(key)
+if missing_keys:
+    logger.error(f"누락된 API 키: {', '.join(missing_keys)}")
+    raise ValueError("환경 변수 파일(.env)에 하나 이상의 API 키가 누락되었습니다.")
+
+@cache_result(expiry_seconds=CACHE_EXPIRY_SECONDS['default'])
+def get_fear_and_greed():
+    if not rate_limiter.can_make_api_call():
+        time.sleep(0.1)
+        return get_fear_and_greed()
+    try:
+        response = requests.get("https://api.alternative.me/fng/", timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        logger.info("공포와 탐욕 지수 가져오기 성공")
+        return int(data['data'][0]['value'])
+    except Exception as e:
+        logger.error(f"공포와 탐욕 지수 가져오기 실패: {e}")
+        return 50
+
+class MarketAnalyzer:
+    def __init__(self):
+        os.makedirs("lstm_models", exist_ok=True)
+        self.client = OpenAI(api_key=OPENAI_API_KEY)
+        self.scaler = MinMaxScaler(feature_range=(0, 1))
+        self.model = self._build_lstm_model()
+        logger.info("시장 분석기 초기화 완료")
+
+    def _build_lstm_model(self):
+        model = Sequential([
+            Input(shape=(60, 1)),
+            LSTM(100, return_sequences=True),
+            Dropout(0.3),
+            LSTM(100),
+            Dropout(0.3),
+            Dense(1)
+        ])
+        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), loss='mse')
+        logger.info("LSTM 모델 생성 완료")
+        return model
+
+class TradingBot:
+    def __init__(self, dca_ratio=DCA_RATIO):
+        self.trading_history = TradingHistory()
+        self.stop_loss_manager = StopLossManager()
+        self.market_analyzer = MarketAnalyzer()
+        self.purchased_coins = FileManager.load_json(COINS_FILE, {"coins": [], "last_analysis": {}})
+        self.last_opportunity_scan = 0
+        self.opportunities = []
+        self.buy_ratios = {
+            'BTC': 0.5,
+            'ETH': 0.5,
+            'ALT': 0.4,
+            'HIGH_CONFIDENCE': 0.7
+        }
+        self.dca_ratio = dca_ratio
+        self.last_portfolio_error_time = 0
+        self.sync_with_upbit_account()
+        logger.info("트레이딩 봇 초기화 완료")
+
+if executed_amount > 0 and order_info["state"] == "done":
+                    executed_price = optimal_price
+                    await self.trading_history.add_trade(ticker, "buy", executed_price, executed_amount, reason)
+                    total_amount = position["amount"] + executed_amount
+                    total_cost = (position["amount"] * position["entry_price"]) + (executed_amount * executed_price)
+                    new_avg_price = total_cost / total_amount if total_amount > 0 else executed_price
+                    self.stop_loss_manager.update_position(ticker, new_avg_price=new_avg_price, amount=total_amount)
+                    logger.info(f"{ticker} 추가 매수 완료: 가격={executed_price:,.2f}원, 수량={executed_amount:.8f}개")
+                    message = (
+                        f"🔥 추가 매수 실행: {ticker}\n"
+                        f"가격: {executed_price:,.2f}원\n"
+                        f"수량: {executed_amount:.8f}개\n"
+                        f"총 금액: {executed_amount * executed_price:,.0f}원\n"
+                        f"사유: {reason}"
+                    )
+
+async def log_portfolio_status(self):
+        try:
+            krw_balance = upbit.get_balance("KRW") or 0
+            total_value = float(krw_balance)
+            total_invested = 0
+            portfolio_message = (
+                f"📊 포트폴리오 상태 ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})\n"
+                f"💰 KRW 잔고: {krw_balance:,.2f}원\n"
+                f"📋 보유 코인:\n"
+            )
+
+try:
+                        coin_data = {
+                            "ticker": ticker,
+                            "current_price": float(current_price),
+                            "entry_price": float(entry_price),
+                            "profit_percent": float(profit_percent),
+                            "predicted_price": float(predicted_price) if predicted_price else None,
+                            "market_risk_level": risk_level,
+                            "sell_ratio": float(sell_ratio)
+                        }
+                        response = self.market_analyzer.client.chat.completions.create(
+                            model="gpt-4",
+                            messages=[
+                                {
+                                    "role": "system",
+                                    "content": """xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                                    예: "수익률 10% 달성 및 시장 하락 예측". 반드시 50자 이내로 유지하세요."""
+                                },
+                                {
+                                    "role": "user",
+                                    "content": json.dumps(coin_data, default=serialize_numpy)
+                                }
+                            ]
+                        )
+                        reason = response.choices[0].message.content.strip()
+
+if __name__ == "__main__":
+    import os
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    CYCLE_INTERVAL = int(os.getenv("CYCLE_INTERVAL", 14400))
+    
+    logger.info("트레이딩 봇 시작...")
+    try:
+        asyncio.run(TradingBot.async_run_bot(cycle_interval=CYCLE_INTERVAL))
+    except KeyboardInterrupt:
+        logger.info("사용자에 의한 종료 요청. 프로그램 종료 중...")
+        # 비동기 작업 정리
+        async def shutdown():
+            tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await async_send_telegram_message("🚨 프로그램이 사용자에 의해 종료되었습니다.")
